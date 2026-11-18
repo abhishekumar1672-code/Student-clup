@@ -1,0 +1,641 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // =========================================================================
+    // 0. GLOBAL SAFETY NET (Default-Deny Catch-All)
+    // =========================================================================
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // =========================================================================
+    // 1. PRIMITIVE & IDENTITY HELPERS
+    // =========================================================================
+    function isValidId(id) {
+      return id is string && id.size() >= 1 && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function existing() {
+      return resource.data;
+    }
+
+    // Every operation requires a signed-in user with a verified email address
+    function isSignedIn() {
+      return request.auth != null && request.auth.token.email_verified == true;
+    }
+
+    function isBootstrappedOwnerEmail() {
+      return isSignedIn() && request.auth.token.email == 'sushilk75960@gmail.com';
+    }
+
+    function userExists() {
+      return isSignedIn() && exists(/databases/$(database)/documents/users/$(request.auth.uid));
+    }
+
+    function currentUserData() {
+      return get(/databases/$(database)/documents/users/$(request.auth.uid)).data;
+    }
+
+    function isActiveUser() {
+      return isSignedIn() && (
+        isBootstrappedOwnerEmail() ||
+        (userExists() && currentUserData().blocked == false)
+      );
+    }
+
+    function isAdmin() {
+      return isSignedIn() && (
+        isBootstrappedOwnerEmail() ||
+        (userExists() && currentUserData().blocked == false && currentUserData().role == 'admin')
+      );
+    }
+
+    function isModeratorOrAdmin() {
+      return isSignedIn() && (
+        isBootstrappedOwnerEmail() ||
+        (userExists() && currentUserData().blocked == false &&
+          (currentUserData().role == 'admin' || currentUserData().role == 'moderator'))
+      );
+    }
+
+    function isAdvertiserOrAdmin() {
+      return isSignedIn() && (
+        isBootstrappedOwnerEmail() ||
+        (userExists() && currentUserData().blocked == false &&
+          (currentUserData().role == 'advertiser' || currentUserData().role == 'admin'))
+      );
+    }
+
+    function isSameCollegeAndDept(collegeId, department) {
+      return isAdmin() || (
+        isActiveUser() &&
+        currentUserData().collegeId == collegeId &&
+        currentUserData().department == department
+      );
+    }
+
+    // =========================================================================
+    // 2. ENTITY SCHEMA VALIDATION HELPERS (Anti-Update-Gap)
+    // =========================================================================
+
+    function isValidAllowedCollege(data) {
+      return data.keys().hasAll(['name', 'emailDomain', 'active', 'createdAt']) &&
+             data.keys().hasOnly(['name', 'emailDomain', 'active', 'createdAt']) &&
+             data.name is string && data.name.size() >= 2 && data.name.size() <= 120 &&
+             data.emailDomain is string && data.emailDomain.size() >= 3 && data.emailDomain.size() <= 100 &&
+             data.emailDomain.matches('^[a-z0-9.-]+\\.[a-z]{2,}$') &&
+             data.active is bool &&
+             data.createdAt is timestamp && data.createdAt <= request.time;
+    }
+
+    function isValidUserProfile(data) {
+      return data.keys().hasAll([
+               'name', 'email', 'collegeId', 'department', 'semester', 'country',
+               'timezone', 'role', 'createdAt', 'trialStartedAt', 'subscriptionStatus',
+               'subscriptionEndsAt', 'premiumBonusDays', 'referralCode', 'referredBy',
+               'blocked', 'aiUsageDate', 'aiUsedToday', 'updatedAt'
+             ]) &&
+             data.keys().hasOnly([
+               'name', 'email', 'collegeId', 'department', 'semester', 'country',
+               'timezone', 'role', 'createdAt', 'trialStartedAt', 'subscriptionStatus',
+               'subscriptionEndsAt', 'premiumBonusDays', 'referralCode', 'referredBy',
+               'blocked', 'aiUsageDate', 'aiUsedToday', 'updatedAt'
+             ]) &&
+             data.name is string && data.name.size() >= 2 && data.name.size() <= 59 &&
+             data.email is string && data.email.size() >= 5 && data.email.size() <= 120 &&
+             data.collegeId is string && data.collegeId.size() >= 1 && data.collegeId.size() <= 100 &&
+             data.department is string && data.department.size() >= 2 && data.department.size() <= 60 &&
+             data.semester is int && data.semester >= 1 && data.semester <= 12 &&
+             data.country is string && data.country.size() >= 2 && data.country.size() <= 60 &&
+             data.timezone is string && data.timezone.size() >= 2 && data.timezone.size() <= 60 &&
+             data.role is string && data.role in ['student', 'moderator', 'admin', 'advertiser'] &&
+             data.createdAt is timestamp && data.createdAt <= request.time &&
+             data.trialStartedAt is timestamp && data.trialStartedAt <= request.time &&
+             data.subscriptionStatus is string && data.subscriptionStatus in ['trial', 'active', 'expired'] &&
+             data.subscriptionEndsAt is timestamp &&
+             data.premiumBonusDays is int && data.premiumBonusDays >= 0 && data.premiumBonusDays <= 3650 &&
+             data.referralCode is string && data.referralCode.size() >= 4 && data.referralCode.size() <= 24 &&
+             data.referredBy is string && data.referredBy.size() <= 24 &&
+             data.blocked is bool &&
+             data.aiUsageDate is string && data.aiUsageDate.size() <= 16 &&
+             data.aiUsedToday is int && data.aiUsedToday >= 0 && data.aiUsedToday <= 15 &&
+             data.updatedAt is timestamp && data.updatedAt <= request.time;
+    }
+
+    function isValidChatRoom(data) {
+      return data.keys().hasAll([
+               'name', 'type', 'collegeId', 'department', 'semester',
+               'createdBy', 'memberCount', 'lastMessageAt', 'createdAt'
+             ]) &&
+             data.keys().hasOnly([
+               'name', 'type', 'collegeId', 'department', 'semester',
+               'createdBy', 'memberCount', 'lastMessageAt', 'createdAt'
+             ]) &&
+             data.name is string && data.name.size() >= 2 && data.name.size() <= 80 &&
+             data.type is string && data.type in ['semester', 'subject', 'general', 'discussion'] &&
+             data.collegeId is string && data.collegeId.size() >= 1 && data.collegeId.size() <= 100 &&
+             data.department is string && data.department.size() >= 2 && data.department.size() <= 60 &&
+             data.semester is int && data.semester >= 0 && data.semester <= 12 &&
+             data.createdBy is string && data.createdBy.size() >= 1 && data.createdBy.size() <= 128 &&
+             data.memberCount is int && data.memberCount >= 1 && data.memberCount <= 100000 &&
+             data.lastMessageAt is timestamp && data.lastMessageAt <= request.time &&
+             data.createdAt is timestamp && data.createdAt <= request.time;
+    }
+
+    function isValidChatMessage(data) {
+      return data.keys().hasAll([
+               'roomId', 'collegeId', 'department', 'senderId', 'senderName',
+               'text', 'type', 'callMode', 'linkUrl', 'createdAt', 'deleted'
+             ]) &&
+             data.keys().hasOnly([
+               'roomId', 'collegeId', 'department', 'senderId', 'senderName',
+               'text', 'type', 'callMode', 'linkUrl', 'createdAt', 'deleted'
+             ]) &&
+             data.roomId is string && data.roomId.size() >= 1 && data.roomId.size() <= 128 &&
+             data.collegeId is string && data.collegeId.size() >= 1 && data.collegeId.size() <= 100 &&
+             data.department is string && data.department.size() >= 2 && data.department.size() <= 60 &&
+             data.senderId is string && data.senderId.size() >= 1 && data.senderId.size() <= 128 &&
+             data.senderName is string && data.senderName.size() >= 2 && data.senderName.size() <= 59 &&
+             data.text is string && data.text.size() >= 1 && data.text.size() <= 2000 &&
+             data.type is string && data.type in ['text', 'meetLink', 'link'] &&
+             data.callMode is string && data.callMode in ['none', 'voice', 'video'] &&
+             data.linkUrl is string && data.linkUrl.size() <= 500 &&
+             data.createdAt is timestamp && data.createdAt <= request.time &&
+             data.deleted is bool;
+    }
+
+    function isValidDoubtPost(data) {
+      return data.keys().hasAll([
+               'collegeId', 'department', 'semester', 'authorId', 'authorName',
+               'title', 'body', 'createdAt', 'answerCount', 'solved'
+             ]) &&
+             data.keys().hasOnly([
+               'collegeId', 'department', 'semester', 'authorId', 'authorName',
+               'title', 'body', 'createdAt', 'answerCount', 'solved'
+             ]) &&
+             data.collegeId is string && data.collegeId.size() >= 1 && data.collegeId.size() <= 100 &&
+             data.department is string && data.department.size() >= 2 && data.department.size() <= 60 &&
+             data.semester is int && data.semester >= 1 && data.semester <= 12 &&
+             data.authorId is string && data.authorId.size() >= 1 && data.authorId.size() <= 128 &&
+             data.authorName is string && data.authorName.size() >= 2 && data.authorName.size() <= 59 &&
+             data.title is string && data.title.size() >= 5 && data.title.size() <= 150 &&
+             data.body is string && data.body.size() >= 5 && data.body.size() <= 3000 &&
+             data.createdAt is timestamp && data.createdAt <= request.time &&
+             data.answerCount is int && data.answerCount >= 0 && data.answerCount <= 10000 &&
+             data.solved is bool;
+    }
+
+    function isValidDoubtAnswer(data) {
+      return data.keys().hasAll([
+               'doubtId', 'collegeId', 'department', 'authorId', 'authorName',
+               'text', 'upvotes', 'upvotedBy', 'best', 'createdAt'
+             ]) &&
+             data.keys().hasOnly([
+               'doubtId', 'collegeId', 'department', 'authorId', 'authorName',
+               'text', 'upvotes', 'upvotedBy', 'best', 'createdAt'
+             ]) &&
+             data.doubtId is string && data.doubtId.size() >= 1 && data.doubtId.size() <= 128 &&
+             data.collegeId is string && data.collegeId.size() >= 1 && data.collegeId.size() <= 100 &&
+             data.department is string && data.department.size() >= 2 && data.department.size() <= 60 &&
+             data.authorId is string && data.authorId.size() >= 1 && data.authorId.size() <= 128 &&
+             data.authorName is string && data.authorName.size() >= 2 && data.authorName.size() <= 59 &&
+             data.text is string && data.text.size() >= 2 && data.text.size() <= 3000 &&
+             data.upvotes is int && data.upvotes >= 0 && data.upvotes <= 100000 &&
+             data.upvotedBy is list && data.upvotedBy.size() <= 200 &&
+             (data.upvotedBy.size() == 0 || data.upvotedBy[0] is string) &&
+             data.best is bool &&
+             data.createdAt is timestamp && data.createdAt <= request.time;
+    }
+
+    function isValidAbuseReport(data) {
+      return data.keys().hasAll([
+               'reporterId', 'targetUserId', 'messageId', 'roomId',
+               'reason', 'status', 'createdAt'
+             ]) &&
+             data.keys().hasOnly([
+               'reporterId', 'targetUserId', 'messageId', 'roomId',
+               'reason', 'status', 'createdAt'
+             ]) &&
+             data.reporterId is string && data.reporterId.size() >= 1 && data.reporterId.size() <= 128 &&
+             data.targetUserId is string && data.targetUserId.size() >= 1 && data.targetUserId.size() <= 128 &&
+             data.messageId is string && data.messageId.size() >= 1 && data.messageId.size() <= 128 &&
+             data.roomId is string && data.roomId.size() >= 1 && data.roomId.size() <= 128 &&
+             data.reason is string && data.reason.size() >= 3 && data.reason.size() <= 500 &&
+             data.status is string && data.status in ['open', 'resolved', 'dismissed'] &&
+             data.createdAt is timestamp && data.createdAt <= request.time;
+    }
+
+    function isValidUserBlockList(data) {
+      return data.keys().hasAll(['userId', 'blockedIds', 'updatedAt']) &&
+             data.keys().hasOnly(['userId', 'blockedIds', 'updatedAt']) &&
+             data.userId is string && data.userId.size() >= 1 && data.userId.size() <= 128 &&
+             data.blockedIds is list && data.blockedIds.size() <= 200 &&
+             (data.blockedIds.size() == 0 || data.blockedIds[0] is string) &&
+             data.updatedAt is timestamp && data.updatedAt <= request.time;
+    }
+
+    function isValidStudyPlanner(data) {
+      return data.keys().hasAll(['userId', 'examName', 'examDate', 'sessions', 'updatedAt']) &&
+             data.keys().hasOnly(['userId', 'examName', 'examDate', 'sessions', 'updatedAt']) &&
+             data.userId is string && data.userId.size() >= 1 && data.userId.size() <= 128 &&
+             data.examName is string && data.examName.size() >= 1 && data.examName.size() <= 100 &&
+             data.examDate is string && data.examDate.size() >= 4 && data.examDate.size() <= 20 &&
+             data.sessions is list && data.sessions.size() <= 50 &&
+             (data.sessions.size() == 0 || data.sessions[0] is string) &&
+             data.updatedAt is timestamp && data.updatedAt <= request.time;
+    }
+
+    function isValidSponsoredAd(data) {
+      return data.keys().hasAll([
+               'title', 'body', 'imageUrl', 'link', 'placement', 'advertiserId',
+               'targetDepartment', 'targetSemester', 'targetCountry',
+               'startDate', 'endDate', 'status', 'views', 'clicks', 'createdAt'
+             ]) &&
+             data.keys().hasOnly([
+               'title', 'body', 'imageUrl', 'link', 'placement', 'advertiserId',
+               'targetDepartment', 'targetSemester', 'targetCountry',
+               'startDate', 'endDate', 'status', 'views', 'clicks', 'createdAt'
+             ]) &&
+             data.title is string && data.title.size() >= 3 && data.title.size() <= 120 &&
+             data.body is string && data.body.size() >= 5 && data.body.size() <= 300 &&
+             data.imageUrl is string && data.imageUrl.size() <= 500 &&
+             data.link is string && data.link.size() >= 5 && data.link.size() <= 500 &&
+             data.placement is string && data.placement in ['home_card', 'room_banner', 'room_pinned'] &&
+             data.advertiserId is string && data.advertiserId.size() >= 1 && data.advertiserId.size() <= 128 &&
+             data.targetDepartment is string && data.targetDepartment.size() >= 2 && data.targetDepartment.size() <= 60 &&
+             data.targetSemester is int && data.targetSemester >= 0 && data.targetSemester <= 12 &&
+             data.targetCountry is string && data.targetCountry.size() >= 2 && data.targetCountry.size() <= 60 &&
+             data.startDate is string && data.startDate.size() >= 8 && data.startDate.size() <= 16 &&
+             data.endDate is string && data.endDate.size() >= 8 && data.endDate.size() <= 16 &&
+             data.status is string && data.status in ['pending', 'approved', 'rejected', 'paused'] &&
+             data.views is int && data.views >= 0 && data.views <= 100000000 &&
+             data.clicks is int && data.clicks >= 0 && data.clicks <= 100000000 &&
+             data.createdAt is timestamp && data.createdAt <= request.time;
+    }
+
+    function isValidReferralRecord(data) {
+      return data.keys().hasAll([
+               'referrerUid', 'referralCode', 'newStudentUid',
+               'newStudentName', 'bonusDaysGranted', 'status', 'createdAt'
+             ]) &&
+             data.keys().hasOnly([
+               'referrerUid', 'referralCode', 'newStudentUid',
+               'newStudentName', 'bonusDaysGranted', 'status', 'createdAt'
+             ]) &&
+             data.referrerUid is string && data.referrerUid.size() >= 1 && data.referrerUid.size() <= 128 &&
+             data.referralCode is string && data.referralCode.size() >= 4 && data.referralCode.size() <= 24 &&
+             data.newStudentUid is string && data.newStudentUid.size() >= 1 && data.newStudentUid.size() <= 128 &&
+             data.newStudentName is string && data.newStudentName.size() >= 2 && data.newStudentName.size() <= 59 &&
+             data.bonusDaysGranted is int && data.bonusDaysGranted >= 0 && data.bonusDaysGranted <= 365 &&
+             data.status is string && data.status in ['pending', 'granted'] &&
+             data.createdAt is timestamp && data.createdAt <= request.time;
+    }
+
+    // =========================================================================
+    // 3. COLLECTION SECURITY RULES
+    // =========================================================================
+
+    // --- 3.1 Allowed Colleges (/allowedColleges/{collegeId}) ---
+    match /allowedColleges/{collegeId} {
+      allow get: if isSignedIn() && isValidId(collegeId) && (existing().active == true || isAdmin());
+      allow list: if isSignedIn() && (existing().active == true || isAdmin());
+      allow create: if isAdmin() && isValidId(collegeId) && isValidAllowedCollege(incoming());
+      allow update: if isAdmin() && isValidId(collegeId) && isValidAllowedCollege(incoming()) &&
+                       incoming().createdAt == existing().createdAt;
+      allow delete: if isAdmin() && isValidId(collegeId);
+    }
+
+    // --- 3.2 User Profiles (/users/{userId}) ---
+    match /users/{userId} {
+      // Strictly isolated PII: only the user themselves or an admin can read their profile
+      allow get: if isSignedIn() && isValidId(userId) && (request.auth.uid == userId || isAdmin());
+      allow list: if isSignedIn() && (existing().email == request.auth.token.email || isAdmin());
+
+      // A new user can create ONLY their own profile, ONLY as role 'student' (or bootstrapped admin),
+      // blocked == false, subscriptionStatus == 'trial', name 2..59 chars
+      allow create: if isSignedIn() &&
+                       isValidId(userId) &&
+                       request.auth.uid == userId &&
+                       isValidUserProfile(incoming()) &&
+                       incoming().blocked == false &&
+                       incoming().subscriptionStatus == 'trial' &&
+                       incoming().premiumBonusDays == 0 &&
+                       incoming().aiUsedToday == 0 &&
+                       (incoming().role == 'student' || (isBootstrappedOwnerEmail() && incoming().role == 'admin'));
+
+      // After creation, a student CANNOT change role, blocked, collegeId, department,
+      // subscription fields, or trialStartedAt. Only admins can modify those fields.
+      allow update: if isSignedIn() &&
+                       isValidId(userId) &&
+                       isValidUserProfile(incoming()) &&
+                       incoming().createdAt == existing().createdAt && (
+                         // Branch 1: Student updating allowed self-service profile or AI quota fields
+                         (request.auth.uid == userId &&
+                          existing().blocked == false &&
+                          incoming().role == existing().role &&
+                          incoming().blocked == existing().blocked &&
+                          incoming().collegeId == existing().collegeId &&
+                          incoming().department == existing().department &&
+                          incoming().trialStartedAt == existing().trialStartedAt &&
+                          incoming().subscriptionStatus == existing().subscriptionStatus &&
+                          incoming().subscriptionEndsAt == existing().subscriptionEndsAt &&
+                          incoming().premiumBonusDays == existing().premiumBonusDays &&
+                          incoming().referralCode == existing().referralCode &&
+                          incoming().email == existing().email &&
+                          incoming().diff(existing()).affectedKeys().hasOnly([
+                            'name', 'semester', 'country', 'timezone',
+                            'aiUsageDate', 'aiUsedToday', 'referredBy', 'updatedAt'
+                          ])) ||
+                         // Branch 2: Admin managing roles, subscription, bonus days, or blocking
+                         isAdmin()
+                       );
+
+      allow delete: if isAdmin() && isValidId(userId);
+    }
+
+    // --- 3.3 Chat Rooms (/rooms/{roomId}) ---
+    match /rooms/{roomId} {
+      // Student reads only rooms of their own college and department
+      allow get: if isValidId(roomId) && isSameCollegeAndDept(existing().collegeId, existing().department);
+      allow list: if isSameCollegeAndDept(existing().collegeId, existing().department);
+
+      // Students can create rooms for their own college & department
+      allow create: if isActiveUser() &&
+                       isValidId(roomId) &&
+                       isValidChatRoom(incoming()) &&
+                       incoming().createdBy == request.auth.uid &&
+                       isSameCollegeAndDept(incoming().collegeId, incoming().department);
+
+      // Room metadata updates (lastMessageAt or memberCount by members of same college & department, or admin)
+      allow update: if isValidId(roomId) &&
+                       isValidChatRoom(incoming()) &&
+                       incoming().createdAt == existing().createdAt &&
+                       incoming().collegeId == existing().collegeId &&
+                       incoming().department == existing().department &&
+                       incoming().createdBy == existing().createdBy && (
+                         (isSameCollegeAndDept(existing().collegeId, existing().department) &&
+                          incoming().diff(existing()).affectedKeys().hasOnly(['lastMessageAt', 'memberCount', 'name'])) ||
+                         isAdmin()
+                       );
+
+      allow delete: if isAdmin() && isValidId(roomId);
+
+      // --- 3.4 Room Messages (/rooms/{roomId}/messages/{messageId}) ---
+      match /messages/{messageId} {
+        allow get: if isValidId(roomId) && isValidId(messageId) &&
+                      isSameCollegeAndDept(existing().collegeId, existing().department);
+        allow list: if isValidId(roomId) &&
+                       isSameCollegeAndDept(existing().collegeId, existing().department);
+
+        // Message belongs to sender, 1..2000 chars, server time, matches room's college & department
+        allow create: if isActiveUser() &&
+                         isValidId(roomId) &&
+                         isValidId(messageId) &&
+                         isValidChatMessage(incoming()) &&
+                         incoming().roomId == roomId &&
+                         incoming().senderId == request.auth.uid &&
+                         incoming().deleted == false &&
+                         isSameCollegeAndDept(incoming().collegeId, incoming().department);
+
+        // Soft-delete: only sender or moderator/admin can mark deleted = true
+        allow update: if isActiveUser() &&
+                         isValidId(roomId) &&
+                         isValidId(messageId) &&
+                         isValidChatMessage(incoming()) &&
+                         incoming().createdAt == existing().createdAt &&
+                         incoming().senderId == existing().senderId &&
+                         incoming().roomId == existing().roomId &&
+                         incoming().collegeId == existing().collegeId &&
+                         incoming().department == existing().department &&
+                         (request.auth.uid == existing().senderId || isModeratorOrAdmin()) &&
+                         incoming().deleted == true &&
+                         incoming().diff(existing()).affectedKeys().hasOnly(['deleted', 'text']);
+
+        // Hard delete allowed for sender or moderator/admin
+        allow delete: if isActiveUser() &&
+                         isValidId(roomId) &&
+                         isValidId(messageId) &&
+                         (request.auth.uid == existing().senderId || isModeratorOrAdmin());
+      }
+    }
+
+    // --- 3.5 Doubt Posts (/doubts/{doubtId}) ---
+    match /doubts/{doubtId} {
+      allow get: if isValidId(doubtId) && isSameCollegeAndDept(existing().collegeId, existing().department);
+      allow list: if isSameCollegeAndDept(existing().collegeId, existing().department);
+
+      allow create: if isActiveUser() &&
+                       isValidId(doubtId) &&
+                       isValidDoubtPost(incoming()) &&
+                       incoming().authorId == request.auth.uid &&
+                       incoming().answerCount == 0 &&
+                       incoming().solved == false &&
+                       isSameCollegeAndDept(incoming().collegeId, incoming().department);
+
+      allow update: if isActiveUser() &&
+                       isValidId(doubtId) &&
+                       isValidDoubtPost(incoming()) &&
+                       incoming().createdAt == existing().createdAt &&
+                       incoming().authorId == existing().authorId &&
+                       incoming().collegeId == existing().collegeId &&
+                       incoming().department == existing().department && (
+                         // Author editing title/body or marking solved
+                         (request.auth.uid == existing().authorId &&
+                          incoming().diff(existing()).affectedKeys().hasOnly(['title', 'body', 'solved', 'answerCount'])) ||
+                         // Classmate incrementing answerCount when posting an answer
+                         (isSameCollegeAndDept(existing().collegeId, existing().department) &&
+                          incoming().diff(existing()).affectedKeys().hasOnly(['answerCount'])) ||
+                         isModeratorOrAdmin()
+                       );
+
+      allow delete: if isActiveUser() && isValidId(doubtId) &&
+                       (request.auth.uid == existing().authorId || isModeratorOrAdmin());
+
+      // --- 3.6 Doubt Answers (/doubts/{doubtId}/answers/{answerId}) ---
+      match /answers/{answerId} {
+        allow get: if isValidId(doubtId) && isValidId(answerId) &&
+                      isSameCollegeAndDept(existing().collegeId, existing().department);
+        allow list: if isValidId(doubtId) &&
+                       isSameCollegeAndDept(existing().collegeId, existing().department);
+
+        allow create: if isActiveUser() &&
+                         isValidId(doubtId) &&
+                         isValidId(answerId) &&
+                         isValidDoubtAnswer(incoming()) &&
+                         incoming().doubtId == doubtId &&
+                         incoming().authorId == request.auth.uid &&
+                         incoming().upvotes == 0 &&
+                         incoming().upvotedBy.size() == 0 &&
+                         incoming().best == false &&
+                         isSameCollegeAndDept(incoming().collegeId, incoming().department);
+
+        allow update: if isActiveUser() &&
+                         isValidId(doubtId) &&
+                         isValidId(answerId) &&
+                         isValidDoubtAnswer(incoming()) &&
+                         incoming().createdAt == existing().createdAt &&
+                         incoming().authorId == existing().authorId &&
+                         incoming().doubtId == existing().doubtId &&
+                         incoming().collegeId == existing().collegeId &&
+                         incoming().department == existing().department && (
+                           // Classmate upvoting or doubt author marking best answer
+                           (isSameCollegeAndDept(existing().collegeId, existing().department) &&
+                            incoming().diff(existing()).affectedKeys().hasOnly(['upvotes', 'upvotedBy', 'best', 'text'])) ||
+                           isModeratorOrAdmin()
+                         );
+
+        allow delete: if isActiveUser() && isValidId(doubtId) && isValidId(answerId) &&
+                         (request.auth.uid == existing().authorId || isModeratorOrAdmin());
+      }
+    }
+
+    // --- 3.7 Abuse Reports (/reports/{reportId}) ---
+    match /reports/{reportId} {
+      allow get: if isValidId(reportId) && (isModeratorOrAdmin() || (isActiveUser() && existing().reporterId == request.auth.uid));
+      allow list: if isModeratorOrAdmin() || (isActiveUser() && existing().reporterId == request.auth.uid);
+
+      allow create: if isActiveUser() &&
+                       isValidId(reportId) &&
+                       isValidAbuseReport(incoming()) &&
+                       incoming().reporterId == request.auth.uid &&
+                       incoming().status == 'open';
+
+      allow update: if isModeratorOrAdmin() &&
+                       isValidId(reportId) &&
+                       isValidAbuseReport(incoming()) &&
+                       incoming().createdAt == existing().createdAt &&
+                       incoming().reporterId == existing().reporterId &&
+                       incoming().diff(existing()).affectedKeys().hasOnly(['status']);
+
+      allow delete: if isAdmin() && isValidId(reportId);
+    }
+
+    // --- 3.8 User Block Lists (/blocks/{userId}) ---
+    match /blocks/{userId} {
+      allow get: if isSignedIn() && isValidId(userId) && request.auth.uid == userId;
+      allow list: if isSignedIn() && request.auth.uid == userId;
+
+      allow create: if isActiveUser() &&
+                       isValidId(userId) &&
+                       request.auth.uid == userId &&
+                       isValidUserBlockList(incoming()) &&
+                       incoming().userId == userId;
+
+      allow update: if isActiveUser() &&
+                       isValidId(userId) &&
+                       request.auth.uid == userId &&
+                       isValidUserBlockList(incoming()) &&
+                       incoming().userId == existing().userId &&
+                       incoming().diff(existing()).affectedKeys().hasOnly(['blockedIds', 'updatedAt']);
+
+      allow delete: if isActiveUser() && isValidId(userId) && request.auth.uid == userId;
+    }
+
+    // --- 3.9 Study Planner (/planner/{userId}) ---
+    match /planner/{userId} {
+      allow get: if isSignedIn() && isValidId(userId) && request.auth.uid == userId;
+      allow list: if isSignedIn() && request.auth.uid == userId;
+
+      allow create: if isActiveUser() &&
+                       isValidId(userId) &&
+                       request.auth.uid == userId &&
+                       isValidStudyPlanner(incoming()) &&
+                       incoming().userId == userId;
+
+      allow update: if isActiveUser() &&
+                       isValidId(userId) &&
+                       request.auth.uid == userId &&
+                       isValidStudyPlanner(incoming()) &&
+                       incoming().userId == existing().userId &&
+                       incoming().diff(existing()).affectedKeys().hasOnly(['examName', 'examDate', 'sessions', 'updatedAt']);
+
+      allow delete: if isActiveUser() && isValidId(userId) && request.auth.uid == userId;
+    }
+
+    // --- 3.10 Sponsored Ads (/ads/{adId}) ---
+    match /ads/{adId} {
+      // Students see only 'approved' ads; advertisers see their own ads; admins see all
+      allow get: if isValidId(adId) && isSignedIn() && (
+                   existing().status == 'approved' ||
+                   existing().advertiserId == request.auth.uid ||
+                   isAdmin()
+                 );
+      allow list: if isSignedIn() && (
+                    existing().status == 'approved' ||
+                    existing().advertiserId == request.auth.uid ||
+                    isAdmin()
+                  );
+
+      // Only an advertiser (or admin) can create a pending ad for themselves
+      allow create: if isAdvertiserOrAdmin() &&
+                       isValidId(adId) &&
+                       isValidSponsoredAd(incoming()) &&
+                       incoming().advertiserId == request.auth.uid &&
+                       incoming().status == 'pending' &&
+                       incoming().views == 0 &&
+                       incoming().clicks == 0;
+
+      // Only admins approve/reject; advertisers can pause/edit pending; students can increment views/clicks on approved ads
+      allow update: if isSignedIn() &&
+                       isValidId(adId) &&
+                       isValidSponsoredAd(incoming()) &&
+                       incoming().createdAt == existing().createdAt &&
+                       incoming().advertiserId == existing().advertiserId && (
+                         // Branch 1: Admin approving, rejecting, or pausing
+                         (isAdmin() &&
+                          incoming().diff(existing()).affectedKeys().hasOnly([
+                            'status', 'title', 'body', 'imageUrl', 'link', 'placement',
+                            'targetDepartment', 'targetSemester', 'targetCountry', 'startDate', 'endDate'
+                          ])) ||
+                         // Branch 2: Advertiser pausing their own ad
+                         (isAdvertiserOrAdmin() &&
+                          existing().advertiserId == request.auth.uid &&
+                          incoming().status in ['pending', 'paused'] &&
+                          incoming().diff(existing()).affectedKeys().hasOnly(['status', 'title', 'body', 'imageUrl', 'link', 'startDate', 'endDate'])) ||
+                         // Branch 3: Active student recording an ad view or click on an approved ad
+                         (isActiveUser() &&
+                          existing().status == 'approved' &&
+                          incoming().status == 'approved' &&
+                          incoming().diff(existing()).affectedKeys().hasOnly(['views', 'clicks']))
+                       );
+
+      allow delete: if isAdmin() && isValidId(adId);
+    }
+
+    // --- 3.11 Referral Records (/referrals/{referralId}) ---
+    match /referrals/{referralId} {
+      allow get: if isSignedIn() && isValidId(referralId) && (
+                   existing().referrerUid == request.auth.uid ||
+                   existing().newStudentUid == request.auth.uid ||
+                   isAdmin()
+                 );
+      allow list: if isSignedIn() && (
+                    existing().referrerUid == request.auth.uid ||
+                    existing().newStudentUid == request.auth.uid ||
+                    isAdmin()
+                  );
+
+      allow create: if isActiveUser() &&
+                       isValidId(referralId) &&
+                       isValidReferralRecord(incoming()) &&
+                       incoming().newStudentUid == request.auth.uid &&
+                       incoming().bonusDaysGranted == 0 &&
+                       incoming().status == 'pending';
+
+      allow update: if isAdmin() &&
+                       isValidId(referralId) &&
+                       isValidReferralRecord(incoming()) &&
+                       incoming().createdAt == existing().createdAt &&
+                       incoming().referrerUid == existing().referrerUid &&
+                       incoming().newStudentUid == existing().newStudentUid &&
+                       incoming().diff(existing()).affectedKeys().hasOnly(['bonusDaysGranted', 'status']);
+
+      allow delete: if isAdmin() && isValidId(referralId);
+    }
+  }
+}

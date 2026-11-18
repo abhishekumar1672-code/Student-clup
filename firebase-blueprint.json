@@ -1,0 +1,657 @@
+{
+  "entities": {
+    "AllowedCollege": {
+      "title": "AllowedCollege",
+      "description": "An approved college or university whose email domain is allowed to join StudyCircle.",
+      "type": "object",
+      "properties": {
+        "name": {
+          "type": "string",
+          "description": "Full display name of the college (2 to 120 characters)."
+        },
+        "emailDomain": {
+          "type": "string",
+          "description": "Lowercase email domain without @, e.g., aiims.edu or iitd.ac.in."
+        },
+        "active": {
+          "type": "boolean",
+          "description": "Whether students from this domain can currently register."
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server timestamp of creation (FieldValue.serverTimestamp())."
+        }
+      },
+      "required": ["name", "emailDomain", "active", "createdAt"]
+    },
+    "UserProfile": {
+      "title": "UserProfile",
+      "description": "A StudyCircle user account profile with college, department, trial, and AI quota metadata.",
+      "type": "object",
+      "properties": {
+        "name": {
+          "type": "string",
+          "description": "Student full name (2 to 59 characters)."
+        },
+        "email": {
+          "type": "string",
+          "description": "Verified email address of the student."
+        },
+        "collegeId": {
+          "type": "string",
+          "description": "ID of the allowedCollege document (immutable after creation for non-admins)."
+        },
+        "department": {
+          "type": "string",
+          "description": "Academic department such as MBBS, B.Tech, BDS, Nursing (immutable after creation for non-admins)."
+        },
+        "semester": {
+          "type": "integer",
+          "description": "Current semester number from 1 to 12."
+        },
+        "country": {
+          "type": "string",
+          "description": "Country name or ISO code (2 to 60 characters)."
+        },
+        "timezone": {
+          "type": "string",
+          "description": "IANA timezone identifier (2 to 60 characters)."
+        },
+        "role": {
+          "type": "string",
+          "enum": ["student", "moderator", "admin", "advertiser"],
+          "description": "RBAC role. Must be 'student' on self-registration."
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server timestamp when the account was created."
+        },
+        "trialStartedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server timestamp when the 3-day free trial started."
+        },
+        "subscriptionStatus": {
+          "type": "string",
+          "enum": ["trial", "active", "expired"],
+          "description": "Current subscription status. Must be 'trial' on creation."
+        },
+        "subscriptionEndsAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server timestamp when the active subscription or trial ends."
+        },
+        "premiumBonusDays": {
+          "type": "integer",
+          "description": "Bonus premium days earned from referrals (granted by admin)."
+        },
+        "referralCode": {
+          "type": "string",
+          "description": "Unique referral code for this student (4 to 24 characters)."
+        },
+        "referredBy": {
+          "type": "string",
+          "description": "Optional referral code of the classmate who invited this user."
+        },
+        "blocked": {
+          "type": "boolean",
+          "description": "Whether the user has been blocked by an admin/moderator. Must be false on creation."
+        },
+        "aiUsageDate": {
+          "type": "string",
+          "description": "UTC date string YYYY-MM-DD for tracking daily AI study helper usage."
+        },
+        "aiUsedToday": {
+          "type": "integer",
+          "description": "Number of AI study questions used on aiUsageDate (0 to 15)."
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server timestamp of last profile update."
+        }
+      },
+      "required": [
+        "name",
+        "email",
+        "collegeId",
+        "department",
+        "semester",
+        "country",
+        "timezone",
+        "role",
+        "createdAt",
+        "trialStartedAt",
+        "subscriptionStatus",
+        "subscriptionEndsAt",
+        "premiumBonusDays",
+        "referralCode",
+        "referredBy",
+        "blocked",
+        "aiUsageDate",
+        "aiUsedToday",
+        "updatedAt"
+      ]
+    },
+    "ChatRoom": {
+      "title": "ChatRoom",
+      "description": "A semester-wise, subject-wise, general, or student-created discussion room scoped to a collegeId and department.",
+      "type": "object",
+      "properties": {
+        "name": {
+          "type": "string",
+          "description": "Room display name (2 to 80 characters)."
+        },
+        "type": {
+          "type": "string",
+          "enum": ["semester", "subject", "general", "discussion"],
+          "description": "Type of chat room."
+        },
+        "collegeId": {
+          "type": "string",
+          "description": "College ID that owns this room."
+        },
+        "department": {
+          "type": "string",
+          "description": "Department that owns this room."
+        },
+        "semester": {
+          "type": "integer",
+          "description": "Target semester (0 for all-semester general/discussion rooms, 1-12 for semester-specific)."
+        },
+        "createdBy": {
+          "type": "string",
+          "description": "UID of the creator."
+        },
+        "memberCount": {
+          "type": "integer",
+          "description": "Approximate member or participant count (>= 1)."
+        },
+        "lastMessageAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server timestamp of the latest message or room creation."
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server timestamp of room creation."
+        }
+      },
+      "required": [
+        "name",
+        "type",
+        "collegeId",
+        "department",
+        "semester",
+        "createdBy",
+        "memberCount",
+        "lastMessageAt",
+        "createdAt"
+      ]
+    },
+    "ChatMessage": {
+      "title": "ChatMessage",
+      "description": "A message inside a room (text, meetLink, or notes/PDF link).",
+      "type": "object",
+      "properties": {
+        "roomId": {
+          "type": "string",
+          "description": "ID of the parent room."
+        },
+        "collegeId": {
+          "type": "string",
+          "description": "Denormalized collegeId matching the parent room for fast zero-trust list verification."
+        },
+        "department": {
+          "type": "string",
+          "description": "Denormalized department matching the parent room."
+        },
+        "senderId": {
+          "type": "string",
+          "description": "UID of the message sender."
+        },
+        "senderName": {
+          "type": "string",
+          "description": "Display name of the sender (2 to 59 characters)."
+        },
+        "text": {
+          "type": "string",
+          "description": "Trimmed message text, Meet URL description, or resource link (1 to 2000 characters)."
+        },
+        "type": {
+          "type": "string",
+          "enum": ["text", "meetLink", "link"],
+          "description": "Message payload type."
+        },
+        "callMode": {
+          "type": "string",
+          "description": "For meetLink messages: 'voice', 'video', or 'none'."
+        },
+        "linkUrl": {
+          "type": "string",
+          "description": "Optional external URL for meetLink or shared study notes/PDF link."
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server timestamp when message was sent."
+        },
+        "deleted": {
+          "type": "boolean",
+          "description": "Soft-delete flag when sender or moderator/admin deletes a message."
+        }
+      },
+      "required": [
+        "roomId",
+        "collegeId",
+        "department",
+        "senderId",
+        "senderName",
+        "text",
+        "type",
+        "callMode",
+        "linkUrl",
+        "createdAt",
+        "deleted"
+      ]
+    },
+    "DoubtPost": {
+      "title": "DoubtPost",
+      "description": "An academic doubt question posted by a student within their college and department.",
+      "type": "object",
+      "properties": {
+        "collegeId": {
+          "type": "string",
+          "description": "College ID of the author."
+        },
+        "department": {
+          "type": "string",
+          "description": "Department of the author."
+        },
+        "semester": {
+          "type": "integer",
+          "description": "Semester number (1 to 12)."
+        },
+        "authorId": {
+          "type": "string",
+          "description": "UID of the student asking the doubt."
+        },
+        "authorName": {
+          "type": "string",
+          "description": "Name of the student asking the doubt (2 to 59 characters)."
+        },
+        "title": {
+          "type": "string",
+          "description": "Doubt question title (5 to 150 characters)."
+        },
+        "body": {
+          "type": "string",
+          "description": "Detailed doubt description (5 to 3000 characters)."
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server timestamp of post creation."
+        },
+        "answerCount": {
+          "type": "integer",
+          "description": "Number of answers posted (>= 0)."
+        },
+        "solved": {
+          "type": "boolean",
+          "description": "Whether the author marked an answer as the best answer."
+        }
+      },
+      "required": [
+        "collegeId",
+        "department",
+        "semester",
+        "authorId",
+        "authorName",
+        "title",
+        "body",
+        "createdAt",
+        "answerCount",
+        "solved"
+      ]
+    },
+    "DoubtAnswer": {
+      "title": "DoubtAnswer",
+      "description": "An answer to a doubt post inside doubts/{doubtId}/answers/{answerId}.",
+      "type": "object",
+      "properties": {
+        "doubtId": {
+          "type": "string",
+          "description": "Parent doubt document ID."
+        },
+        "collegeId": {
+          "type": "string",
+          "description": "Denormalized collegeId of the parent doubt."
+        },
+        "department": {
+          "type": "string",
+          "description": "Denormalized department of the parent doubt."
+        },
+        "authorId": {
+          "type": "string",
+          "description": "UID of the student answering."
+        },
+        "authorName": {
+          "type": "string",
+          "description": "Name of the answering student (2 to 59 characters)."
+        },
+        "text": {
+          "type": "string",
+          "description": "Answer text (2 to 3000 characters)."
+        },
+        "upvotes": {
+          "type": "integer",
+          "description": "Net upvote count (>= 0)."
+        },
+        "upvotedBy": {
+          "type": "array",
+          "description": "Bounded list of up to 200 user IDs who upvoted this answer."
+        },
+        "best": {
+          "type": "boolean",
+          "description": "Whether this answer is marked as the best answer."
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server timestamp of answer creation."
+        }
+      },
+      "required": [
+        "doubtId",
+        "collegeId",
+        "department",
+        "authorId",
+        "authorName",
+        "text",
+        "upvotes",
+        "upvotedBy",
+        "best",
+        "createdAt"
+      ]
+    },
+    "AbuseReport": {
+      "title": "AbuseReport",
+      "description": "A student-submitted abuse report against a message or user.",
+      "type": "object",
+      "properties": {
+        "reporterId": {
+          "type": "string",
+          "description": "UID of the student filing the report."
+        },
+        "targetUserId": {
+          "type": "string",
+          "description": "UID of the reported user."
+        },
+        "messageId": {
+          "type": "string",
+          "description": "ID of the reported message (or 'profile' if user report)."
+        },
+        "roomId": {
+          "type": "string",
+          "description": "ID of the room where the incident happened."
+        },
+        "reason": {
+          "type": "string",
+          "description": "Reason for reporting (3 to 500 characters)."
+        },
+        "status": {
+          "type": "string",
+          "enum": ["open", "resolved", "dismissed"],
+          "description": "Moderation status of the report."
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server timestamp of report submission."
+        }
+      },
+      "required": [
+        "reporterId",
+        "targetUserId",
+        "messageId",
+        "roomId",
+        "reason",
+        "status",
+        "createdAt"
+      ]
+    },
+    "UserBlockList": {
+      "title": "UserBlockList",
+      "description": "Per-user list of blocked user IDs stored at blocks/{uid}.",
+      "type": "object",
+      "properties": {
+        "userId": {
+          "type": "string",
+          "description": "Owner UID matching document ID."
+        },
+        "blockedIds": {
+          "type": "array",
+          "description": "Bounded list (max 200) of UIDs blocked by this student."
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server timestamp when block list was updated."
+        }
+      },
+      "required": ["userId", "blockedIds", "updatedAt"]
+    },
+    "StudyPlanner": {
+      "title": "StudyPlanner",
+      "description": "Per-student exam countdown and study-session schedule stored at planner/{uid}.",
+      "type": "object",
+      "properties": {
+        "userId": {
+          "type": "string",
+          "description": "Owner UID matching document ID."
+        },
+        "examName": {
+          "type": "string",
+          "description": "Title of upcoming exam (1 to 100 characters)."
+        },
+        "examDate": {
+          "type": "string",
+          "description": "ISO date YYYY-MM-DD of upcoming exam."
+        },
+        "sessions": {
+          "type": "array",
+          "description": "Bounded array (max 50) of study session strings (e.g., '2026-11-20 | 18:00 | Anatomy Ch 4 | 60m')."
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server timestamp of last update."
+        }
+      },
+      "required": ["userId", "examName", "examDate", "sessions", "updatedAt"]
+    },
+    "SponsoredAd": {
+      "title": "SponsoredAd",
+      "description": "Sponsored advertisement created by an advertiser and approved by an admin.",
+      "type": "object",
+      "properties": {
+        "title": {
+          "type": "string",
+          "description": "Ad headline (3 to 120 characters)."
+        },
+        "body": {
+          "type": "string",
+          "description": "Short promotional copy (5 to 300 characters)."
+        },
+        "imageUrl": {
+          "type": "string",
+          "description": "HTTPS image or banner URL (0 to 500 characters)."
+        },
+        "link": {
+          "type": "string",
+          "description": "HTTPS destination link (5 to 500 characters)."
+        },
+        "placement": {
+          "type": "string",
+          "enum": ["home_card", "room_banner", "room_pinned"],
+          "description": "Where the ad appears (never inside private chats or blocking popups)."
+        },
+        "advertiserId": {
+          "type": "string",
+          "description": "UID of the advertiser who created the ad."
+        },
+        "targetDepartment": {
+          "type": "string",
+          "description": "Target department or 'ALL'."
+        },
+        "targetSemester": {
+          "type": "integer",
+          "description": "Target semester (0 for all semesters, 1-12 for specific)."
+        },
+        "targetCountry": {
+          "type": "string",
+          "description": "Target country or 'ALL'."
+        },
+        "startDate": {
+          "type": "string",
+          "description": "Start date YYYY-MM-DD."
+        },
+        "endDate": {
+          "type": "string",
+          "description": "End date YYYY-MM-DD."
+        },
+        "status": {
+          "type": "string",
+          "enum": ["pending", "approved", "rejected", "paused"],
+          "description": "Approval lifecycle state. Only approved ads are visible to students."
+        },
+        "views": {
+          "type": "integer",
+          "description": "Total impression count (>= 0)."
+        },
+        "clicks": {
+          "type": "integer",
+          "description": "Total click count (>= 0)."
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server timestamp of ad creation."
+        }
+      },
+      "required": [
+        "title",
+        "body",
+        "imageUrl",
+        "link",
+        "placement",
+        "advertiserId",
+        "targetDepartment",
+        "targetSemester",
+        "targetCountry",
+        "startDate",
+        "endDate",
+        "status",
+        "views",
+        "clicks",
+        "createdAt"
+      ]
+    },
+    "ReferralRecord": {
+      "title": "ReferralRecord",
+      "description": "Records when a new student joins using a classmate's referral code so an admin can grant bonus premium days.",
+      "type": "object",
+      "properties": {
+        "referrerUid": {
+          "type": "string",
+          "description": "UID of the student who owns the referralCode."
+        },
+        "referralCode": {
+          "type": "string",
+          "description": "Referral code used."
+        },
+        "newStudentUid": {
+          "type": "string",
+          "description": "UID of the newly registered student."
+        },
+        "newStudentName": {
+          "type": "string",
+          "description": "Name of the newly registered student."
+        },
+        "bonusDaysGranted": {
+          "type": "integer",
+          "description": "Number of bonus premium days granted by admin (0 when pending)."
+        },
+        "status": {
+          "type": "string",
+          "enum": ["pending", "granted"],
+          "description": "Whether an admin has granted the referral reward."
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server timestamp of referral creation."
+        }
+      },
+      "required": [
+        "referrerUid",
+        "referralCode",
+        "newStudentUid",
+        "newStudentName",
+        "bonusDaysGranted",
+        "status",
+        "createdAt"
+      ]
+    }
+  },
+  "firestore": {
+    "/allowedColleges/{collegeId}": {
+      "schema": { "$ref": "#/entities/AllowedCollege" },
+      "description": "Approved college email domains."
+    },
+    "/users/{userId}": {
+      "schema": { "$ref": "#/entities/UserProfile" },
+      "description": "Student, moderator, advertiser, and admin user profiles."
+    },
+    "/rooms/{roomId}": {
+      "schema": { "$ref": "#/entities/ChatRoom" },
+      "description": "Semester, subject, general, and discussion rooms."
+    },
+    "/rooms/{roomId}/messages/{messageId}": {
+      "schema": { "$ref": "#/entities/ChatMessage" },
+      "description": "Paginated messages inside a room."
+    },
+    "/doubts/{doubtId}": {
+      "schema": { "$ref": "#/entities/DoubtPost" },
+      "description": "Student doubt posts scoped by college and department."
+    },
+    "/doubts/{doubtId}/answers/{answerId}": {
+      "schema": { "$ref": "#/entities/DoubtAnswer" },
+      "description": "Answers and upvotes for a doubt post."
+    },
+    "/reports/{reportId}": {
+      "schema": { "$ref": "#/entities/AbuseReport" },
+      "description": "Abuse reports filed by students and reviewed by admins."
+    },
+    "/blocks/{userId}": {
+      "schema": { "$ref": "#/entities/UserBlockList" },
+      "description": "Per-user blocked user ID array."
+    },
+    "/planner/{userId}": {
+      "schema": { "$ref": "#/entities/StudyPlanner" },
+      "description": "Per-student exam countdown and study session planner."
+    },
+    "/ads/{adId}": {
+      "schema": { "$ref": "#/entities/SponsoredAd" },
+      "description": "Sponsored ads with department/semester/country targeting."
+    },
+    "/referrals/{referralId}": {
+      "schema": { "$ref": "#/entities/ReferralRecord" },
+      "description": "Referral redemptions awaiting or granted admin bonus days."
+    }
+  }
+}

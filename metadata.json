@@ -1,0 +1,6 @@
+{
+  "name": "StudyCircle",
+  "description": "Verified college student community app with semester and subject chat rooms, AI study helper, doubt Q&A, exam planner, referrals, and admin panel.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
